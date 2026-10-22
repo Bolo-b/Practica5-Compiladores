@@ -2,19 +2,64 @@ noterminales = ["S'","S","P","LS","I","E","C","T"]
 terminales = ["(", ")", "defun", "id", "if", "+", "first", "rest", "null", "'", "num", "nil", "t"]
 #Clase para almacenar el AST
 class Nodo:
-    def __init__(self, simbolo, hijos=None, regla=None):
+    def __init__(self, simbolo, hijos=None):
         self.simbolo = simbolo
         self.hijos = hijos or []
-        self.regla = regla
 
-def imprimir_ast(nodo, nivel=0):
-    sangria = "    " * nivel
-    if nodo.regla:
-        print(f"{sangria}{nodo.regla}")
+
+def imprimir_ast(nodo, prefijo="", es_ultimo=True, es_raiz=True):
+    if es_raiz:
+        print(nodo.simbolo)
+        nuevo_prefijo = ""
     else:
-        print(f"{sangria}{nodo.simbolo}")
-    for h in nodo.hijos:
-        imprimir_ast(h, nivel + 1)
+        print(prefijo + ("   " if es_ultimo else "   ") + nodo.simbolo)
+        nuevo_prefijo = prefijo + ("    " if es_ultimo else "    ")
+    for i, h in enumerate(nodo.hijos):
+        imprimir_ast(h, nuevo_prefijo, i == len(nodo.hijos) - 1, False)
+
+#Depende de la construccion del lenguaje almacena los datos de forma distinta en los nodos
+def construir(n, h):
+    # S -> S P
+    if n == 1:
+        if h[0].simbolo == "programa":
+            h[0].hijos.append(h[1])
+            return h[0]
+        return Nodo("programa", [h[0], h[1]])
+    # S -> P | P -> E | E -> T | T -> id/num/nil/t | I -> id
+    if n in (2, 4, 15, 7, 18, 19, 20, 21):
+        return h[0]
+    # P -> ( defun id ( LS ) E )
+    if n == 3:
+        return Nodo("defun", [h[2], h[4], h[6]])
+    # LS -> I LS
+    if n == 5:
+        return Nodo("( )", [h[0]] + h[1].hijos)
+    # LS -> I
+    if n == 6:
+        return Nodo("( )", [h[0]])
+    # E -> ( I E )   llamada a función: id(E)
+    if n == 8:
+        h[1].hijos.append(h[2])
+        return h[1]
+    # E -> ( if E E E )
+    if n == 9:
+        return Nodo("if", [h[2], h[3], h[4]])
+    # E -> ( E + E )
+    if n == 10:
+        return Nodo("+", [h[1], h[3]])
+    # E -> ( first E ) | ( rest E ) | ( null E )
+    if n in (11, 12, 13):
+        return Nodo(h[1].simbolo, [h[2]])
+    # E -> ' ( C )
+    if n == 14:
+        return Nodo("'", h[2].hijos)
+    # C -> C T
+    if n == 16:
+        h[0].hijos.append(h[1])
+        return h[0]
+    # C -> T
+    if n == 17:
+        return Nodo("C", [h[0]])
         
 def parse(tokens: list):
     tokens = tokens + ["$"]
@@ -28,9 +73,7 @@ def parse(tokens: list):
 
         #Si acepta, terminamos
         if accion == "acc":
-            raiz = pila[-1][1]
-            raiz = Nodo("S'", [raiz], "S' -> S")
-            return True, raiz
+            return True, pila[-1][1]
 
         #Cuando solo es un número y esta en no terminales, shift
         if isinstance(accion, int) and accion != 0:
@@ -42,26 +85,23 @@ def parse(tokens: list):
             n = int(accion[1:])
             lhs, rhs = producciones[n]
             k = len(rhs)
-
-            # Hijos: los k nodos de la cima (vacío si es producción epsilon)
+            #Saca de la pila
             hijos = [nodo for _, nodo in pila[len(pila) - k:]] if k else []
             if k:
                 del pila[-k:]
-
-            regla = f"{lhs} -> {' '.join(rhs) if rhs else 'epsilon'}"
-
-            # CASO NO TERMINAL: GOTO con el lhs sobre el estado que quedó en la cima
+            #Contruimos el ASA
+            nodo = construir(n, hijos)
+            #Con el nuevo estado transicionado despues de eleminiar
+            #Realizamos el movimiento
             destino = transiciones[pila[-1][0]][simbolos[lhs]]
             if destino == 0:
                 print(f"Error: goto inválido en estado {pila[-1][0]} con {lhs}")
                 return False, None
+            pila.append((destino, nodo))
 
-            pila.append((destino, Nodo(lhs, hijos, regla)))
-            # NO se avanza i: el token de entrada sigue siendo el mismo
-
-        # ERROR
+        #Por default, la accion es 0 y es error
         else:
-            print(f"Error sintáctico en el token '{token}' (posición {i}), estado {estado}")
+            print(f"Syntax Error: token '{token}' (posición {i}), estado {estado}")
             return False, None
     
 
@@ -146,7 +186,7 @@ if __name__ == "__main__":
     21: ("T",  ["t"]),
     }
 
-    prueba1 = ["(","num","+","num",")"]
+    prueba1 = ["(","num","+","(","num","+","num",")",")"]
     prueba2 = ["(","if","nil","num","num",")"]
     prueba3 = ["(", "first", "'", "(", "num", ")", ")"]
     prueba4 = ["(","defun","id","(","id",")","num",")"]
@@ -158,12 +198,24 @@ if __name__ == "__main__":
     prueba_error5 = ["(","null","num"] #Parentesis desbalanceados
 
 
-    print(parse(prueba1))
-    print(parse(prueba2))
-    print(parse(prueba3))
-    print(parse(prueba4))
-    print(parse(prueba5))
+    result1, asa1 = parse(prueba1)
+    result2, asa2 = parse(prueba2)
+    result3, asa3 = parse(prueba3)
+    result4, asa4 = parse(prueba4)
+    result5, asa5 = parse(prueba5)
 
+    print(result1)
+    imprimir_ast(asa1)
+    print("\n"+str(result2))
+    imprimir_ast(asa2)
+    print("\n"+str(result3))
+    imprimir_ast(asa3)
+    print("\n"+str(result4))
+    imprimir_ast(asa4)
+    print("\n"+str(result5))
+    imprimir_ast(asa5)
+
+    print("Programas con error: ")
     print(parse(prueba_error1))
     print(parse(prueba_error2))
     print(parse(prueba_error3))
